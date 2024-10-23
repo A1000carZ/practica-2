@@ -1,7 +1,6 @@
 #include <iostream>
 #include <iomanip>
 #include <vector>
-#include <deque>
 #include <queue>
 #include <stdlib.h>
 #include <stdio.h>
@@ -10,16 +9,15 @@
 
 using namespace std;
 
-
-const int PAGE_SIZE = 64;          
-const int TOTAL_MEMORY = 1536;     
-const int OS_MEMORY = 20;          
-const int MAX_FRAMES_PER_TASK = 3; 
+const int PAGE_SIZE = 64;
+const int TOTAL_MEMORY = 1536;
+const int OS_MEMORY = 20;
+const int MAX_FRAMES_PER_TASK = 3;
 const int AVAILABLE_FRAMES = (TOTAL_MEMORY / PAGE_SIZE);
-const int PAGE_SEQUENCE_SIZE = 8; 
-const int MIN_LINES = 100;        
-const int MAX_LINES = 1000;       
-const int NUM_TASKS = 20;         
+const int PAGE_SEQUENCE_SIZE = 8;
+const int MIN_LINES = 100;
+const int MAX_LINES = 1000;
+const int NUM_TASKS = 20;
 
 struct PageNode
 {
@@ -48,10 +46,15 @@ struct MMTNode
     MMTNode *next;
 };
 
-struct Frame {
+struct Frame
+{
     int page;
     bool isEmpty;
-    Frame() { page = -1; isEmpty = true; }
+    Frame()
+    {
+        page = -1;
+        isEmpty = true;
+    }
 };
 
 MMTNode *mmt = NULL;
@@ -70,14 +73,14 @@ void printPMT(int taskId);
 void printEmptyPMT(int taskId);
 TaskNode *findTask(int taskId);
 string toString(int value);
-void fifoPageReplacement(const vector<int>& pageSequence);
-void printMemoryState(const vector<Frame>& memory);
-
+void fifoPageReplacement(const vector<int> &pageSequence);
+void printMemoryState(const Frame *memory, MMTNode *mmt, int time, int pageFaults);
+void printListaAux(queue<int, deque<int>> fifoQueue); // Function to print the auxiliary list
 
 int main()
 {
     srand(static_cast<unsigned int>(time(0)));
-
+    int taskChoice;
     initializeMMT();
     printMMT();
 
@@ -88,9 +91,17 @@ int main()
 
     printJT();
     printAllPMT();
-    cout << "\nDemonstrating FIFO Page Replacement for Task J1:" << endl;
-    TaskNode *task1 = findTask(1);
-    if (task1 != NULL) {
+    cout << "Ingresa la tarea a utilizar: ";
+    cin >> taskChoice;
+    if (taskChoice < 1 || taskChoice > NUM_TASKS)
+    {
+        cout << "Tarea invalida. Intente de nuevo." << endl;
+        return 1; // Exit with an error code
+    }
+    cout << "\nDemonstrating FIFO Page Replacement for Task J" << taskChoice << ":" << endl;
+    TaskNode *task1 = findTask(taskChoice);
+    if (task1 != NULL)
+    {
         vector<int> pageSequence(task1->sequence, task1->sequence + PAGE_SEQUENCE_SIZE);
         fifoPageReplacement(pageSequence);
     }
@@ -176,7 +187,8 @@ int assignFrame()
         if (frame->status == 0)
         {
             frame->status = 1;
-            return frame->location;
+            assignedFrames++;
+            return frame->frameNumber; // Return the frame number instead of location
         }
         frame = frame->next;
     }
@@ -264,7 +276,7 @@ void printPMT(int taskId)
     PageNode *page = task->pmt;
     while (page != NULL)
     {
-        cout << setw(10) << page->pageNumber 
+        cout << setw(10) << page->pageNumber
              << setw(10) << (page->frame != -1 ? toString(page->frame) : string("-"))
              << setw(10) << "0" << setw(10) << "0" << setw(10) << "0" << endl;
         page = page->next;
@@ -296,68 +308,223 @@ TaskNode *findTask(int taskId)
     return NULL;
 }
 
-void fifoPageReplacement(const vector<int>& pageSequence) {
-    vector<Frame> memory(MAX_FRAMES_PER_TASK);
-    queue<int, deque<int> > fifoQueue;
+void fifoPageReplacement(const vector<int> &pageSequence)
+{
+    Frame memory[3];                  // Exactly 3 frames: M1, M2, M3
+    queue<int, deque<int>> fifoQueue; // Queue to track frame order
     int pageFaults = 0;
-    cout << "FIFO Remplazo de pagina" << endl;
-    cout << "-------------------------------" << endl;
-    for (int i = 0; i < pageSequence.size(); ++i) {
-        int currentPage = pageSequence[i];
+
+    // Initialize frames as empty
+    for (int i = 0; i < 3; i++)
+    {
+        memory[i].page = -1;
+        memory[i].isEmpty = true;
+    }
+
+    cout << "\nFIFO (First In First Out)" << endl;
+    cout << "-------------------------" << endl;
+
+    for (int time = 0; time < PAGE_SEQUENCE_SIZE; time++)
+    {
+        int currentPage = pageSequence[time];
         bool pageFault = true;
-        cout << "Tiempo " << i << ": Procesando P" << currentPage << endl;
-        
-        for (int j = 0; j < MAX_FRAMES_PER_TASK; ++j) {
-            if (!memory[j].isEmpty && memory[j].page == currentPage) {
+
+        cout << "\nTiempo T" << time << ":" << endl;
+        cout << "Referencia a P" << currentPage << endl;
+
+        // Check if page is already in memory
+        for (int i = 0; i < 3; i++)
+        {
+            if (!memory[i].isEmpty && memory[i].page == currentPage)
+            {
                 pageFault = false;
                 break;
             }
         }
-        if (pageFault) {
+
+        if (pageFault)
+        {
             pageFaults++;
-            cout << "Fallo de pagina (*)." << endl;
-            
-            int replaceIndex = -1;
-            for (int j = 0; j < MAX_FRAMES_PER_TASK; ++j) {
-                if (memory[j].isEmpty) {
-                    replaceIndex = j;
-                    break;
-                }
-            }
-            if (replaceIndex == -1) {
-                
-                int oldestPage = fifoQueue.front();
-                fifoQueue.pop();
-                for (int j = 0; j < MAX_FRAMES_PER_TASK; ++j) {
-                    if (memory[j].page == oldestPage) {
-                        replaceIndex = j;
+            cout << "* Fallo de página *" << endl;
+
+            // Find empty frame or use FIFO replacement
+            int frameToUse;
+            if (fifoQueue.size() < 3)
+            {
+                // Find first empty frame
+                for (int i = 0; i < 3; i++)
+                {
+                    if (memory[i].isEmpty)
+                    {
+                        frameToUse = i;
                         break;
                     }
                 }
+                cout << "Usando marco libre M" << (frameToUse + 1) << endl;
             }
-            
-            memory[replaceIndex].page = currentPage;
-            memory[replaceIndex].isEmpty = false;
-            fifoQueue.push(currentPage);
-        } else {
-            cout << "Pagina previamente cargada en memoria." << endl;
+            else
+            {
+                // Use FIFO replacement
+                frameToUse = fifoQueue.front();
+                cout << "Reemplazando P" << memory[frameToUse].page
+                     << " en M" << (frameToUse + 1) << " con P" << currentPage << endl;
+                fifoQueue.pop();
+            }
+
+            // Update memory and queue
+            memory[frameToUse].page = currentPage;
+            memory[frameToUse].isEmpty = false;
+            fifoQueue.push(frameToUse);
+
+            // Update MMT status
+            MMTNode *current = mmt;
+            for (int i = 0; i < frameToUse && current != NULL; i++)
+            {
+                current = current->next;
+            }
+            if (current != NULL)
+            {
+                current->status = 1;
+            }
         }
-        printMemoryState(memory);
+        else
+        {
+            cout << "Página P" << currentPage << " ya está en memoria" << endl;
+        }
+
+        // Print current state
+        cout << "\nEstado de Marcos:" << endl;
+        for (int i = 0; i < 3; i++)
+        {
+            cout << "M" << (i + 1) << ": ";
+            if (!memory[i].isEmpty)
+            {
+                cout << "P" << memory[i].page;
+            }
+            else
+            {
+                cout << "--";
+            }
+            cout << endl;
+        }
+
+        // Print FIFO Queue contents
+        cout << "\nCola FIFO: ";
+        queue<int, deque<int>> tempQueue = fifoQueue;
+        while (!tempQueue.empty())
+        {
+            int frame = tempQueue.front();
+            cout << "P" << memory[frame].page << " ";
+            tempQueue.pop();
+        }
         cout << endl;
+
+        // Print page replacement information
+        if (pageFault)
+        {
+            cout << "Reemplazo: ";
+            if (fifoQueue.size() <= 3)
+            {
+                cout << "Se usó marco libre" << endl;
+            }
+            else
+            {
+                cout << "FIFO seleccionó M" << (fifoQueue.front() + 1) << endl;
+            }
+        }
     }
-    cout << "Total de errores de pagina: " << pageFaults << endl;
+
+    cout << "\nResumen:" << endl;
+    cout << "Total de fallos de página: " << pageFaults << endl;
 }
 
-void printMemoryState(const vector<Frame>& memory) {
-    cout << "Estado de Memoria: ";
-    for (int i = 0; i < MAX_FRAMES_PER_TASK; ++i) {
-        if (memory[i].isEmpty) {
-            cout << "[ ] ";
-        } else {
-            cout << "[P" << memory[i].page << "] ";
-        }
+void printMemoryState(const Frame* memory, MMTNode* mmt, int time, int pageFaults) {
+    // Print MMT
+    cout << "--TABLA DE MAPA DE MEMORIA--" << endl;
+    cout << setw(8) << "Marco" << setw(12) << "Localidad" << setw(10) << "Estado" << endl;
+
+    MMTNode* current = mmt;
+    int count = 0;
+    while (current != NULL && count < MAX_FRAMES_PER_TASK) {
+        cout << setw(8) << current->frameNumber
+             << setw(12) << current->location
+             << setw(10) << current->status << endl;
+        current = current->next;
+        count++;
     }
     cout << endl;
+
+    // Print PMT
+    cout << "--TABLA DE MAPA DE PAGINAS--" << endl;
+    cout << setw(8) << "Pagina" << setw(8) << "Marco" << setw(10) << "Estado"
+         << setw(8) << "Refer." << setw(10) << "Modifi." << endl;
+
+    // Find maximum page number in current memory
+    int maxPage = -1;
+    int i;
+    for (i = 0; i < MAX_FRAMES_PER_TASK; i++) {
+        if (!memory[i].isEmpty && memory[i].page > maxPage) {
+            maxPage = memory[i].page;
+        }
+    }
+    maxPage = (maxPage > 2) ? maxPage : 2; // Ensure we show at least 3 pages
+
+    // For each page, check its current state in memory
+    for (i = 0; i <= maxPage; i++) {
+        int frameNum = -1;
+        bool isPresent = false;
+
+        // Find if this page is currently in memory and get its real frame number
+        int j;
+        for (j = 0; j < MAX_FRAMES_PER_TASK; j++) {
+            if (!memory[j].isEmpty && memory[j].page == i) {
+                // Get the real frame number from MMT
+                MMTNode* temp = mmt;
+                int count = 0;
+                while (temp != NULL && count < j) {
+                    temp = temp->next;
+                    count++;
+                }
+                if (temp != NULL) {
+                    frameNum = temp->frameNumber;
+                    isPresent = true;
+                }
+                break;
+            }
+        }
+    for (int i = 0; i <= 5; i++)
+    {
+        bool isPresent = false;
+        int frameNum = -1;
+
+        // ... (check if page is in memory)
+
+        cout << setw(8) << i;
+
+        // Correctly handle the frame number output:
+        if (isPresent)
+        {
+            cout << setw(8) << frameNum;
+        }
+        else
+        {
+            cout << setw(8) << "-";
+        }
+
+        cout << setw(10) << (isPresent ? "1" : "0")
+             << setw(8) << (isPresent ? "1" : "0")
+             << setw(10) << "0" << endl;
+    }
+    cout << endl;
+}
+
+void printListaAux(queue<int, deque<int>> fifoQueue){
+    queue<int, deque<int>> queueCopy = fifoQueue; // Create a copy of the queue for printing
+    while (!queueCopy.empty())
+    {
+        cout << "P" << queueCopy.front() << " ";
+        queueCopy.pop();
+    }
 }
 
 string toString(int value)
